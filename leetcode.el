@@ -729,6 +729,24 @@ of QUERY-NAME."
                                  (push .slug tags)))
                              .topicTags '()))))
 
+(defun leetcode--remember-problem (problem)
+  "Insert or replace PROBLEM in the global cache."
+  (let* ((problems (leetcode-problems-problems leetcode--problems))
+         (existing (leetcode--get-problem-by-id (leetcode-problem-id problem))))
+    (if existing
+        (setf (leetcode-problems-problems leetcode--problems)
+              (mapcar (lambda (item)
+                        (if (equal (leetcode-problem-id item)
+                                   (leetcode-problem-id problem))
+                            problem
+                          item))
+                      problems))
+      (push problem (leetcode-problems-problems leetcode--problems)))
+    (setq leetcode--all-tags
+          (delete-dups
+           (append (leetcode-problem-tags problem) leetcode--all-tags)))
+    problem))
+
 (aio-defun leetcode--query-problemset-question-list-v2 (category-slug skip limit filters search-keyword sort-by)
   "Return a problemset page without mutating the global cache."
   (let* ((payload (leetcode--graphql-payload
@@ -746,17 +764,33 @@ of QUERY-NAME."
          (response (aio-await (aio-url-retrieve leetcode--url-graphql)))
          (response-status (car response))
          (response-buffer (cdr response)))
+    (leetcode--debug
+     "random query request: category=%s skip=%s limit=%s filters=%S sort-by=%S"
+     category-slug skip limit filters sort-by)
     (if-let ((error (plist-get response-status :error)))
         (progn
           (switch-to-buffer response-buffer)
+          (leetcode--warn "random query transport error: %S" error)
           (user-error "LeetCode query failed: %S" error))
       (let-alist (with-current-buffer response-buffer
                    (goto-char url-http-end-of-headers)
                    (json-read))
-        (list :questions (mapcar #'leetcode--question-alist-to-problem
-                                 (append .data.problemsetQuestionListV2.questions nil))
-              :total-length .data.problemsetQuestionListV2.totalLength
-              :has-more .data.problemsetQuestionListV2.hasMore)))))
+        (when .errors
+          (leetcode--warn "random query graphql errors: %S" .errors)
+          (user-error "LeetCode random query failed: %S" .errors))
+        (let ((questions (mapcar #'leetcode--question-alist-to-problem
+                                 (append .data.problemsetQuestionListV2.questions nil)))
+              (total-length .data.problemsetQuestionListV2.totalLength)
+              (has-more .data.problemsetQuestionListV2.hasMore))
+          (leetcode--debug
+           "random query response: total=%s count=%s has-more=%S ids=%S"
+           total-length
+           (length questions)
+           has-more
+           (mapcar #'leetcode-problem-id questions))
+          (list :questions questions
+                :total-length total-length
+                :has-more has-more))))))
 
 (aio-defun leetcode--ensure-question-title (problem)
   (if (and (leetcode-problem-dislikes problem)
@@ -1053,6 +1087,7 @@ row."
                    (leetcode--query-problemset-question-list-v2
                     "all-code-essentials" 0 1 filters "" sort-by)))
          (total-length (plist-get summary :total-length)))
+    (leetcode--debug "random problem summary: difficulty=%S total=%s" difficulty total-length)
     (when (<= total-length 0)
       (user-error "No problems found for difficulty: %s" (or difficulty "Any")))
     (let* ((offset (random total-length))
@@ -1060,6 +1095,12 @@ row."
                   (leetcode--query-problemset-question-list-v2
                    "all-code-essentials" offset 1 filters "" sort-by)))
            (problem (car (plist-get page :questions))))
+      (leetcode--debug "random problem selected offset=%s returned=%S"
+                       offset
+                       (and problem
+                            (list (leetcode-problem-id problem)
+                                  (leetcode-problem-title-slug problem)
+                                  (leetcode-problem-difficulty problem))))
       (or problem
           (user-error "LeetCode random query returned no problem"))
       problem)))
@@ -1132,13 +1173,14 @@ When DIFFICULTY is nil, prompt for Any, Easy, Medium, or Hard."
         choice))))
   (aio-await (leetcode--ensure-login))
   (let* ((problem (aio-await (leetcode--random-problem difficulty)))
-         (problem-with-title (aio-await (leetcode--ensure-question-title problem)))
-         (problem-with-content (aio-await (leetcode--ensure-question-content problem)))
-         (problem-with-testcases (aio-await (leetcode--ensure-question-testcases problem)))
-         (problem-with-snippets (aio-await (leetcode--ensure-question-snippets problem))))
+         (cached-problem (leetcode--remember-problem problem))
+         (problem-with-title (aio-await (leetcode--ensure-question-title cached-problem)))
+         (problem-with-content (aio-await (leetcode--ensure-question-content cached-problem)))
+         (problem-with-testcases (aio-await (leetcode--ensure-question-testcases cached-problem)))
+         (problem-with-snippets (aio-await (leetcode--ensure-question-snippets cached-problem))))
     (message "LeetCode random problem: %s. %s"
-             (leetcode-problem-id problem)
-             (leetcode-problem-title problem))
+             (leetcode-problem-id cached-problem)
+             (leetcode-problem-title cached-problem))
     (leetcode--show-problem problem-with-snippets)))
 
 (aio-defun leetcode--ensure-login (&optional force)
