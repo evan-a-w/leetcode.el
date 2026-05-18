@@ -69,31 +69,44 @@
       (leetcode--log-enable-debugging)
       (message "leetcode enable debug"))))
 
-(defun leetcode--install-my-cookie ()
-  "Install leetcode dependencies."
-  (let ((async-shell-command-display-buffer t)
-        (pipx (executable-find "pipx"))
-        (python3 (executable-find "python3"))
-        (python (executable-find "python")))
-    (async-shell-command
-     (if pipx
-         (format "%s install my_cookies" pipx)
-       (format "%s -m venv --clear %s && %s/bin/pip3 install my_cookies"
-               (or python3 python "python") ; require python environment
-               leetcode-python-environment leetcode-python-environment))
-     (get-buffer-create "*leetcode-install*"))))
+(defconst leetcode--library-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory containing leetcode.el.")
 
-(defun leetcode--my-cookies-path ()
-  "Find the path to the my_cookies executable."
-  (or (executable-find (format "%s/bin/my_cookies" leetcode-python-environment))
-      (executable-find "my_cookies")))
+(defconst leetcode--my-cookies-script
+  (file-name-concat leetcode--library-dir "scripts" "my_cookies.py")
+  "Path to the vendored cookie helper.")
+
+(defun leetcode--python-path ()
+  "Find a Python 3 executable."
+  (or (executable-find "python3")
+      (executable-find "python")))
+
+(defun leetcode--my-cookies-command (&optional keys)
+  "Build the command used to retrieve cookies.
+KEYS is an optional list of cookie names to fetch."
+  (when-let ((python (leetcode--python-path)))
+    (when (file-exists-p leetcode--my-cookies-script)
+      (mapconcat
+       #'shell-quote-argument
+       `(,python
+         ,leetcode--my-cookies-script
+         "--domain-name" ,leetcode--domain
+         ,@(when keys
+             `("--keys" ,(string-join keys ","))))
+       " "))))
 
 (defun leetcode--check-deps ()
-  "Check if all dependencies installed."
-  (if (leetcode--my-cookies-path)
+  "Check if the vendored cookie helper can run."
+  (unless (eq system-type 'darwin)
+    (user-error "The vendored cookie helper currently supports macOS only"))
+  (unless (executable-find "security")
+    (user-error "leetcode.el requires the macOS `security` command"))
+  (unless (executable-find "openssl")
+    (user-error "leetcode.el requires the `openssl` command"))
+  (if (leetcode--my-cookies-command)
       t
-    (leetcode--install-my-cookie)
-    nil))
+    (user-error "leetcode.el requires python3 (or python) to run scripts/my_cookies.py")))
 
 (defgroup leetcode nil
   "A Leetcode client."
@@ -134,7 +147,7 @@ mysql, mssql, oraclesql."
   :type 'boolean)
 
 (defcustom leetcode-python-environment (file-name-concat user-emacs-directory "leetcode-env")
-  "The path to the isolated python virtual-environment to use."
+  "Deprecated. The vendored cookie helper no longer uses a Python virtualenv."
   :group 'leetcode
   :type 'directory)
 
@@ -420,9 +433,11 @@ VALUE should be the referer."
   (cons "Referer" value))
 
 (defun leetcode--cookie-get-all ()
-  "Get leetcode session with `my_cookies'. You can install it with pip."
-  (let* ((my-cookies (leetcode--my-cookies-path))
-         (my-cookies-output (shell-command-to-string (leetcode--my-cookies-path)))
+  "Get LeetCode cookies with the vendored helper."
+  (let* ((my-cookies-output
+          (shell-command-to-string
+           (leetcode--my-cookies-command
+            (list leetcode--cookie-csrftoken leetcode--cookie-session))))
          (cookies-list (seq-filter (lambda (s) (not (string-empty-p s)))
                                    (s-split "\n" my-cookies-output 'OMIT-NULLS)))
          (cookies-pairs (seq-map (lambda (s) (s-split-up-to " " s 1 'OMIT-NULLS)) cookies-list)))

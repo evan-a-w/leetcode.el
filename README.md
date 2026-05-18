@@ -59,7 +59,7 @@ You can also disable IDE-like features by adding hook to `leetcode-solution-mode
 - [Spacemacs](https://github.com/syl20bnr/spacemacs):
   [leetcode-emacs-layer](https://github.com/anmoljagetia/leetcode-emacs-layer)
 
-LeetCode do not allow third party login, one workaround is restore LeetCode session from local Firefox or Chrome cookies. By default, this package will install a Python3 package called [my\_cookies](https://github.com/kaiwk/my_cookies), or you can install it manually: `pip3 install my_cookies`.
+LeetCode do not allow third party login, one workaround is to restore the LeetCode session from local browser cookies. This repository now ships with a built-in helper script for macOS that reads only the LeetCode cookies it needs from Firefox or common Chromium-based browsers. It may trigger the normal macOS Keychain access prompt when reading Chrome-family cookies.
 
 Since we are using [shr.el](https://www.emacswiki.org/emacs/HtmlRendering) to render HTML, you may also want to look at [shrface](https://github.com/chenyanming/shrface).
 
@@ -96,4 +96,3 @@ You can save solution by setting `leetcode-save-solutions`:
 # Debug
 
 Call `leetcode-toggle-debug`, log will output in `*leetcode-log*` buffer.
-
