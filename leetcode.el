@@ -157,6 +157,16 @@ This applies to both `leetcode-try' and `leetcode-submit'."
   :group 'leetcode
   :type 'integer)
 
+(defcustom leetcode-random-unsolved-only t
+  "Whether `leetcode-random' should skip solved problems."
+  :group 'leetcode
+  :type 'boolean)
+
+(defcustom leetcode-random-max-attempts 25
+  "Maximum number of random samples before giving up."
+  :group 'leetcode
+  :type 'integer)
+
 (defcustom leetcode-python-environment (file-name-concat user-emacs-directory "leetcode-env")
   "Deprecated. The vendored cookie helper no longer uses a Python virtualenv."
   :group 'leetcode
@@ -1090,19 +1100,31 @@ row."
     (leetcode--debug "random problem summary: difficulty=%S total=%s" difficulty total-length)
     (when (<= total-length 0)
       (user-error "No problems found for difficulty: %s" (or difficulty "Any")))
-    (let* ((offset (random total-length))
-           (page (aio-await
-                  (leetcode--query-problemset-question-list-v2
-                   "all-code-essentials" offset 1 filters "" sort-by)))
-           (problem (car (plist-get page :questions))))
-      (leetcode--debug "random problem selected offset=%s returned=%S"
-                       offset
-                       (and problem
-                            (list (leetcode-problem-id problem)
-                                  (leetcode-problem-title-slug problem)
-                                  (leetcode-problem-difficulty problem))))
+    (let ((attempt 0)
+          problem)
+      (while (and (< attempt leetcode-random-max-attempts)
+                  (not problem))
+        (let* ((offset (random total-length))
+               (page (aio-await
+                      (leetcode--query-problemset-question-list-v2
+                       "all-code-essentials" offset 1 filters "" sort-by)))
+               (candidate (car (plist-get page :questions))))
+          (leetcode--debug "random problem selected attempt=%s offset=%s returned=%S"
+                           attempt
+                           offset
+                           (and candidate
+                                (list (leetcode-problem-id candidate)
+                                      (leetcode-problem-title-slug candidate)
+                                      (leetcode-problem-difficulty candidate)
+                                      (leetcode-problem-status candidate))))
+          (when (and candidate
+                     (or (not leetcode-random-unsolved-only)
+                         (not (equal (leetcode-problem-status candidate) "SOLVED"))))
+            (setq problem candidate)))
+        (setq attempt (1+ attempt)))
       (or problem
-          (user-error "LeetCode random query returned no problem"))
+          (user-error "Could not find an unsolved random problem after %s attempts"
+                      leetcode-random-max-attempts))
       problem)))
 
 (defvar leetcode--load-more-button-fn
