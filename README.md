@@ -23,6 +23,7 @@ LeetCode brings you offer, and now Emacs brings you LeetCode!
 | t                   | filter problems by tag                   |
 | T                   | toggle tag display                       |
 | d                   | filter problems by difficulty            |
+| R                   | open a random problem by difficulty      |
 | r                   | reset filters                            |
 | P                   | toggle paid problems display             |
 | g (z for evil-mode) | refresh without fetching from LeetCode   |
