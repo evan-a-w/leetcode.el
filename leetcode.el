@@ -1321,9 +1321,13 @@ Call `leetcode-show-problem-in-browser' on the current problem id."
   "Start coding the problem with id PROBLEM-ID."
   (interactive (list (read-number "Solve the problem with id: "
                                   (leetcode--get-current-problem-id))))
-  (let* ((problem (leetcode--get-problem-by-id problem-id)))
-    (leetcode--show-problem problem)
-    (leetcode--start-coding problem)))
+  (let* ((problem (leetcode--get-problem-by-id problem-id))
+         (problem-with-title (aio-await (leetcode--ensure-question-title problem)))
+         (problem-with-content (aio-await (leetcode--ensure-question-content problem)))
+         (problem-with-testcases (aio-await (leetcode--ensure-question-testcases problem)))
+         (problem-with-snippets (aio-await (leetcode--ensure-question-snippets problem))))
+    (leetcode--show-problem problem-with-snippets)
+    (leetcode--start-coding problem-with-snippets)))
 
 (defun leetcode-solve-current-problem ()
   "Start coding the current problem.
@@ -1410,6 +1414,15 @@ Call `leetcode-solve-problem' on the current problem id."
   "Get id of the current problem."
   (aref (tabulated-list-get-entry) 1))
 
+(defun leetcode--preferred-snippet (snippets)
+  "Return the preferred snippet from SNIPPETS.
+Fall back to the first available snippet if the preferred language
+is not present."
+  (or (seq-find (lambda (s)
+                  (equal (leetcode-snippet-lang-slug s) leetcode--lang))
+                snippets)
+      (car snippets)))
+
 (defun leetcode--start-coding (problem)
   "Create a buffer for coding PROBLEM.
 The buffer will be not associated with any file.  It will choose
@@ -1419,6 +1432,7 @@ major mode by `leetcode-prefer-language'and `auto-mode-alist'."
          (problem-id (leetcode-problem-id problem))
          (snippets (leetcode-problem-snippets problem))
          (testcases (leetcode-problem-testcases problem))
+         (detail-buf (get-buffer (leetcode--detail-buffer-name problem-id)))
          (testcase-buf-name (leetcode--testcase-buffer-name problem-id))
          (result-buf-name (leetcode--result-buffer-name problem-id)))
 
@@ -1430,6 +1444,8 @@ major mode by `leetcode-prefer-language'and `auto-mode-alist'."
 
     ;; Set current programming language.
     (leetcode--set-lang snippets)
+    (when detail-buf
+      (set-window-buffer leetcode--description-window detail-buf))
 
     ;; Setup code buffer
     (let* ((code-buf-name (leetcode--get-code-buffer-name title))
@@ -1437,21 +1453,19 @@ major mode by `leetcode-prefer-language'and `auto-mode-alist'."
            (suffix (assoc-default leetcode--lang leetcode--lang-suffixes)))
       (with-current-buffer code-buf
         (when (= (buffer-size code-buf) 0)
-          (let* ((snippet (seq-find (lambda (s)
-                                      (equal (leetcode-snippet-lang-slug s) leetcode--lang))
-                                    snippets))
-                 (template-code (leetcode-snippet-code snippet)))
-            (leetcode--insert-code-start-marker)
-            (insert template-code)
-            (leetcode--insert-code-end-marker)
-            (leetcode--replace-in-buffer "" "")))
+          (let ((snippet (leetcode--preferred-snippet snippets)))
+            (unless snippet
+              (user-error "No code snippet available for problem %s" problem-id))
+            (let ((template-code (leetcode-snippet-code snippet)))
+              (leetcode--insert-code-start-marker)
+              (insert template-code)
+              (leetcode--insert-code-end-marker)
+              (leetcode--replace-in-buffer "" ""))))
         (funcall (assoc-default suffix auto-mode-alist #'string-match-p))
         (leetcode-solution-mode t))
 
-      (display-buffer code-buf
-                      '((display-buffer-reuse-window
-                         leetcode--display-code)
-                        (reusable-frames . visible))))
+      (set-window-buffer (window-left-child (frame-root-window)) code-buf)
+      (select-window (window-left-child (frame-root-window))))
 
     ;; Setup testcase buffer
     (with-current-buffer (get-buffer-create testcase-buf-name)
